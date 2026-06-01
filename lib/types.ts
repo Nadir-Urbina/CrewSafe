@@ -62,13 +62,21 @@ export type EmployeeRole = "crew" | "supervisor" | "admin";
 
 export interface Employee {
   id: string;
-  name: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string;
   role: EmployeeRole;
   supervisorId?: string;
-  crewId?: string;
+  crewName?: string;
   active: boolean;
   points: number;
   createdAt: Timestamp;
+  updatedAt?: Timestamp;
+}
+
+export function employeeFullName(e: Pick<Employee, "firstName" | "lastName">) {
+  return `${e.firstName} ${e.lastName}`;
 }
 
 // ─── Heat Illness Log ────────────────────────────────────────────────────────
