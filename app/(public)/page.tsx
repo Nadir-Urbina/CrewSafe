@@ -1,20 +1,11 @@
 import Link from "next/link";
 import HazardStripe from "@/components/ui/HazardStripe";
-import BigButton from "@/components/ui/BigButton";
 
 function ShieldIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--cs-ink)" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/>
       <path d="M9 12l2 2 4-4"/>
-    </svg>
-  );
-}
-
-function PlusIcon() {
-  return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round">
-      <path d="M12 5v14M5 12h14"/>
     </svg>
   );
 }
@@ -221,21 +212,39 @@ export default function HomePage() {
       </div>
 
       {/* ── FAB ──────────────────────────────────────────────── */}
-      <div style={{
-        position: "absolute", left: 0, right: 0, bottom: 60,
-        padding: "14px 16px",
-        background: "linear-gradient(to top, var(--cs-paper) 72%, transparent)",
-        zIndex: 20,
-      }}>
-        <div style={{ maxWidth: 520, margin: "0 auto" }}>
-          <Link href="/submit" style={{ display: "block", textDecoration: "none" }}>
-            <BigButton>
-              <PlusIcon />
-              Report Incident
-            </BigButton>
-          </Link>
-        </div>
-      </div>
+      <Link
+        href="/submit"
+        title="Report Incident"
+        style={{
+          position: "fixed",
+          right: 20,
+          bottom: 80, // sits just above the bottom nav bar
+          width: 62,
+          height: 62,
+          borderRadius: 999,
+          background: "var(--cs-hiviz)",
+          border: "3px solid var(--cs-ink)",
+          boxShadow: "0 6px 0 var(--cs-ink), 0 10px 24px rgba(0,0,0,0.22)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          textDecoration: "none",
+          zIndex: 40,
+          flexShrink: 0,
+          minHeight: 0,
+        }}
+      >
+        <svg
+          width={28} height={28}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="var(--cs-ink)"
+          strokeWidth={3}
+          strokeLinecap="round"
+        >
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+      </Link>
     </div>
   );
 }
