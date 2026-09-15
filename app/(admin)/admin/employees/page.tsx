@@ -8,6 +8,7 @@ import {
   type AddEmployeeInput, type ImportRow, type ImportResult,
 } from "@/lib/firebase/employees";
 import { Employee, EmployeeRole, employeeFullName } from "@/lib/types";
+import { sendAdminSignInLink } from "@/lib/firebase/auth";
 import Avatar from "@/components/ui/Avatar";
 import StatusPill from "@/components/ui/StatusPill";
 
@@ -84,8 +85,9 @@ function EmployeeDrawer({
   const [role,      setRole]      = useState<EmployeeRole>(editingEmployee?.role ?? "crew");
   const [supervisorId, setSupervisorId] = useState(editingEmployee?.supervisorId ?? "");
   const [crewName,  setCrewName]  = useState(editingEmployee?.crewName  ?? "");
-  const [saving,    setSaving]    = useState(false);
-  const [error,     setError]     = useState("");
+  const [saving,     setSaving]    = useState(false);
+  const [error,      setError]     = useState("");
+  const [inviteSent, setInviteSent] = useState(false);
 
   const supervisorOptions = allEmployees.filter(
     (e) => e.active && e.id !== editingEmployee?.id && (e.role === "supervisor" || e.role === "admin")
@@ -104,10 +106,23 @@ function EmployeeDrawer({
         email: email.trim().toLowerCase(), phone: phone.trim(),
         role, supervisorId: supervisorId || undefined, crewName: crewName.trim(),
       };
+      const wasAdmin = editingEmployee?.role === "admin";
       if (isEdit) {
         await updateEmployee(editingEmployee!.id, data);
       } else {
         await addEmployee(data);
+      }
+      // Send magic-link invitation when an admin account is created or promoted
+      const becameAdmin = role === "admin" && !wasAdmin;
+      if (becameAdmin) {
+        try {
+          await sendAdminSignInLink(data.email);
+          setInviteSent(true);
+          setTimeout(onSaved, 2000);
+          return;
+        } catch {
+          // Invite failed — still save succeeded, proceed normally
+        }
       }
       onSaved();
     } catch (e: unknown) {
@@ -124,7 +139,13 @@ function EmployeeDrawer({
       footer={
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {error && <div style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "var(--cs-critical)", background: "var(--cs-critical-soft)", borderRadius: 8, padding: "8px 12px" }}>{error}</div>}
-          <button onClick={handleSave} disabled={saving} style={{ width: "100%", height: 54, borderRadius: 12, background: saving ? "var(--cs-paper-deep)" : "var(--cs-hiviz)", border: `2.5px solid ${saving ? "var(--cs-line)" : "var(--cs-ink)"}`, boxShadow: saving ? "none" : "0 4px 0 var(--cs-ink)", fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, textTransform: "uppercase", cursor: saving ? "not-allowed" : "pointer", color: saving ? "var(--cs-faint)" : "var(--cs-ink)" }}>
+          {inviteSent && (
+            <div style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "var(--cs-safe)", background: "var(--cs-safe-soft)", border: "1.5px solid var(--cs-safe)", borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
+              <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="var(--cs-safe)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="M4 12.5l5.5 5.5L20 6"/></svg>
+              Admin invite sent to {email.trim().toLowerCase()}
+            </div>
+          )}
+          <button onClick={handleSave} disabled={saving || inviteSent} style={{ width: "100%", height: 54, borderRadius: 12, background: (saving || inviteSent) ? "var(--cs-paper-deep)" : "var(--cs-hiviz)", border: `2.5px solid ${(saving || inviteSent) ? "var(--cs-line)" : "var(--cs-ink)"}`, boxShadow: (saving || inviteSent) ? "none" : "0 4px 0 var(--cs-ink)", fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, textTransform: "uppercase", cursor: (saving || inviteSent) ? "not-allowed" : "pointer", color: (saving || inviteSent) ? "var(--cs-faint)" : "var(--cs-ink)" }}>
             {saving ? "Saving…" : isEdit ? "Save Changes" : "Add Employee"}
           </button>
         </div>
@@ -207,7 +228,7 @@ function ImportDrawer({ onClose, onImported, existingEmployees }: {
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Employees");
-    XLSX.writeFile(wb, "crewsafe-employees-template.xlsx");
+    XLSX.writeFile(wb, "hardhatleague-employees-template.xlsx");
   }
 
   async function handleImport() {
@@ -516,7 +537,8 @@ export default function EmployeesPage() {
             </div>
 
             {/* Mobile card list */}
-            <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }} className="lg:hidden">
+            <div className="lg:hidden">
+            <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
               {filtered.map((emp) => (
                 <div key={emp.id} onClick={() => { setEditingEmployee(emp); setAddDrawerOpen(true); }} style={{ background: "var(--cs-paper)", border: "2px solid var(--cs-line)", borderRadius: 14, padding: 14, cursor: "pointer", opacity: emp.active ? 1 : 0.55 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -535,6 +557,7 @@ export default function EmployeesPage() {
                   </div>
                 </div>
               ))}
+            </div>
             </div>
           </>
         )}

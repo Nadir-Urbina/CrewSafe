@@ -6,7 +6,8 @@ export type IncidentType =
   | "hazard"
   | "near-miss"
   | "injury-illness"
-  | "vehicle-accident";
+  | "vehicle-accident"
+  | "wins";
 
 export type IncidentStatus = "new" | "in-review" | "review-completed";
 
@@ -19,6 +20,7 @@ export interface Incident {
   date: string; // ISO date string of when the incident occurred
   description: string;
   location?: string;
+  severity?: "low" | "med" | "high";
   photoUrl?: string;
   // Type-specific fields
   hazardDetails?: HazardDetails;
@@ -81,19 +83,30 @@ export function employeeFullName(e: Pick<Employee, "firstName" | "lastName">) {
 
 // ─── Heat Illness Log ────────────────────────────────────────────────────────
 
-export type TempThreshold = "92-99" | "100-105" | "106+";
-
 export interface HeatLog {
   id: string;
   supervisorId: string;
   supervisorName: string;
   temperature: number;
-  threshold: TempThreshold;
+  threshold: string; // level name, e.g. "Moderate Risk" or "safe"
   location: { lat: number; lng: number };
   locationName?: string;
   checklist: Record<string, boolean>;
   comments: string;
   createdAt: Timestamp;
+}
+
+// ─── Heat Program (admin-configurable thresholds) ────────────────────────────
+
+export interface HeatProgramLevel {
+  name:    string;   // e.g. "Moderate Risk"
+  minTemp: number;   // heat index lower bound (°F, inclusive)
+  maxTemp: number;   // heat index upper bound (°F, inclusive); level 3 ignores this
+  actions: string[]; // ordered checklist items for this level
+}
+
+export interface HeatProgram {
+  levels: [HeatProgramLevel, HeatProgramLevel, HeatProgramLevel];
 }
 
 // ─── Rewards ─────────────────────────────────────────────────────────────────

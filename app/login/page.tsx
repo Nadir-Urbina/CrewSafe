@@ -1,77 +1,101 @@
 "use client";
 
-import { loginAdmin, sendAdminSignInLink } from "@/lib/firebase/auth";
+import { sendAdminSignInLink } from "@/lib/firebase/auth";
 import HazardStripe from "@/components/ui/HazardStripe";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-type Mode = "password" | "email-link";
 
-function ShieldIcon() {
+function MailIcon() {
   return (
-    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--cs-ink)" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/>
-      <path d="M9 12l2 2 4-4"/>
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--cs-safe)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
     </svg>
   );
 }
 
+const inputStyle: React.CSSProperties = {
+  width: "100%", boxSizing: "border-box",
+  background: "var(--cs-card)", border: "2px solid var(--cs-line)", borderRadius: 12,
+  padding: "14px 16px",
+  fontFamily: "var(--font-body)", fontSize: 16, fontWeight: 500, color: "var(--cs-ink)",
+  outline: "none",
+};
+
+const labelStyle: React.CSSProperties = {
+  display: "block",
+  fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 13,
+  letterSpacing: 0.6, textTransform: "uppercase", color: "var(--cs-ink2)", marginBottom: 8,
+};
+
+type Mode = "link" | "password";
+
 export default function LoginPage() {
-  const router = useRouter();
-  const [mode, setMode] = useState<Mode>("password");
-  const [email, setEmail] = useState("");
+  const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [mode, setMode]         = useState<Mode>("link");
+  const [loading, setLoading]   = useState(false);
   const [linkSent, setLinkSent] = useState(false);
+  const [error, setError]       = useState("");
+  const [passwordAvailable, setPasswordAvailable] = useState(false);
 
-  function switchMode(next: Mode) {
-    setMode(next);
-    setError("");
-    setLinkSent(false);
-  }
+  // The server decides whether a break-glass password is configured at all.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/session")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled) setPasswordAvailable(Boolean(data?.enabled));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
-  async function handlePasswordSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-    try {
-      await loginAdmin(email, password);
-      router.replace("/admin");
-    } catch {
-      setError("Invalid email or password. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleEmailLinkSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
+  async function handleSendLink() {
     try {
       await sendAdminSignInLink(email);
       setLinkSent(true);
     } catch {
-      setError("Could not send sign-in link. Check the email address and try again.");
+      setError("Could not send a sign-in link. Check the email address and try again.");
+    }
+  }
+
+  async function handlePasswordLogin() {
+    const res = await fetch("/api/admin/fallback-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      setError(data?.error ?? "Could not sign in. Please try again.");
+      return;
+    }
+
+    // Full navigation so AuthProvider re-reads the newly set session cookie.
+    window.location.href = "/admin";
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      if (mode === "password") {
+        await handlePasswordLogin();
+      } else {
+        await handleSendLink();
+      }
     } finally {
       setLoading(false);
     }
   }
 
-  const inputStyle: React.CSSProperties = {
-    width: "100%", boxSizing: "border-box",
-    background: "var(--cs-card)", border: "2px solid var(--cs-line)", borderRadius: 12,
-    padding: "14px 16px",
-    fontFamily: "var(--font-body)", fontSize: 16, fontWeight: 500, color: "var(--cs-ink)",
-    outline: "none",
-  };
-
-  const labelStyle: React.CSSProperties = {
-    display: "block",
-    fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 13,
-    letterSpacing: 0.6, textTransform: "uppercase", color: "var(--cs-ink2)", marginBottom: 8,
-  };
+  function switchMode(next: Mode) {
+    setMode(next);
+    setError("");
+    setPassword("");
+  }
 
   return (
     <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--cs-paper)", padding: "24px 16px" }}>
@@ -79,15 +103,9 @@ export default function LoginPage() {
 
         {/* Logo */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 32 }}>
-          <div style={{
-            width: 72, height: 72, borderRadius: 20, background: "var(--cs-hiviz)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            boxShadow: "0 6px 0 var(--cs-ink), 0 10px 20px rgba(0,0,0,0.15)",
-          }}>
-            <ShieldIcon />
-          </div>
+          <img src="/hhlAppIcon.png" alt="Hard Hat League" style={{ width: 88, height: 88, borderRadius: 20, boxShadow: "0 6px 0 var(--cs-ink), 0 10px 24px rgba(0,0,0,0.2)" }} />
           <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 30, letterSpacing: 0.5, textTransform: "uppercase", color: "var(--cs-ink)", marginTop: 16, lineHeight: 1 }}>
-            CrewSafe
+            Hard Hat League
           </div>
           <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, letterSpacing: 1.5, textTransform: "uppercase", color: "var(--cs-muted)", marginTop: 4 }}>
             Admin Sign In
@@ -96,78 +114,111 @@ export default function LoginPage() {
 
         {/* Card */}
         <div style={{ background: "var(--cs-card)", border: "2px solid var(--cs-line)", borderRadius: 18, overflow: "hidden", boxShadow: "0 8px 0 var(--cs-ink)" }}>
-          {/* Hazard stripe top */}
           <HazardStripe height={8} />
 
-          <div style={{ padding: "24px 24px 28px" }}>
-            {/* Mode toggle */}
-            <div style={{ display: "flex", background: "var(--cs-paper-deep)", padding: 4, borderRadius: 12, border: "1.5px solid var(--cs-line)", marginBottom: 24 }}>
-              {(["password", "email-link"] as Mode[]).map((m) => {
-                const on = mode === m;
-                return (
-                  <button key={m} type="button" onClick={() => switchMode(m)} style={{
-                    flex: 1, height: 40, borderRadius: 9, cursor: "pointer", border: "none",
-                    background: on ? "var(--cs-ink)" : "transparent",
-                    color: on ? "#fff" : "var(--cs-ink2)",
-                    fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 14,
-                    letterSpacing: 0.4, textTransform: "uppercase",
-                    transition: "background .12s",
-                    minHeight: 0,
-                  }}>
-                    {m === "password" ? "Password" : "Email Link"}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Password form */}
-            {mode === "password" && (
-              <form onSubmit={handlePasswordSubmit} style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-                <div>
-                  <label htmlFor="email" style={labelStyle}>Email</label>
-                  <input id="email" type="email" required autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" style={inputStyle} />
+          <div style={{ padding: "28px 24px 32px" }}>
+            {linkSent ? (
+              /* ── Success state ── */
+              <div style={{ textAlign: "center" }}>
+                <div style={{ width: 56, height: 56, borderRadius: 999, background: "var(--cs-safe-soft)", border: "2px solid var(--cs-safe)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 18px" }}>
+                  <MailIcon />
                 </div>
-                <div>
-                  <label htmlFor="password" style={labelStyle}>Password</label>
-                  <input id="password" type="password" required autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" style={inputStyle} />
+                <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 24, color: "var(--cs-ink)", textTransform: "uppercase", letterSpacing: 0.3 }}>
+                  Check your email
                 </div>
-                {error && <ErrorBanner message={error} />}
-                <SubmitBtn loading={loading} label="Sign In" loadingLabel="Signing in…" />
-              </form>
-            )}
-
-            {/* Email-link form */}
-            {mode === "email-link" && (
-              <div>
-                {linkSent ? (
-                  <div style={{ textAlign: "center", padding: "12px 0" }}>
-                    <div style={{ width: 52, height: 52, borderRadius: 999, background: "var(--cs-safe-soft)", border: "2px solid var(--cs-safe)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
-                      <svg width={26} height={26} viewBox="0 0 24 24" fill="none" stroke="var(--cs-safe)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-                      </svg>
-                    </div>
-                    <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 22, color: "var(--cs-ink)", textTransform: "uppercase" }}>Check your email</div>
-                    <div style={{ fontFamily: "var(--font-body)", fontSize: 14, color: "var(--cs-muted)", marginTop: 8, lineHeight: 1.5 }}>
-                      We sent a sign-in link to <strong style={{ color: "var(--cs-ink)" }}>{email}</strong>
-                    </div>
-                    <button type="button" onClick={() => { setLinkSent(false); setEmail(""); }} style={{ marginTop: 16, background: "none", border: "none", cursor: "pointer", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 13, letterSpacing: 0.4, textTransform: "uppercase", color: "var(--cs-hiviz-deep)", minHeight: 0 }}>
-                      Use a different email
-                    </button>
+                <div style={{ fontFamily: "var(--font-body)", fontSize: 14.5, color: "var(--cs-muted)", marginTop: 10, lineHeight: 1.55 }}>
+                  We sent a sign-in link to{" "}
+                  <strong style={{ color: "var(--cs-ink)" }}>{email}</strong>.
+                  <br />Click it to access the admin dashboard.
+                </div>
+                <div style={{ marginTop: 16, padding: "12px 16px", background: "var(--cs-paper-deep)", border: "1.5px solid var(--cs-line)", borderRadius: 10 }}>
+                  <div style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "var(--cs-muted)", lineHeight: 1.5 }}>
+                    The link expires in <strong style={{ color: "var(--cs-ink)" }}>1 hour</strong> and can only be used once. Check your spam folder if you don&apos;t see it.
                   </div>
-                ) : (
-                  <form onSubmit={handleEmailLinkSubmit} style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-                    <div>
-                      <label htmlFor="email-link" style={labelStyle}>Email</label>
-                      <input id="email-link" type="email" required autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" style={inputStyle} />
-                    </div>
-                    <p style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "var(--cs-muted)", margin: 0, lineHeight: 1.5 }}>
-                      We&apos;ll send a one-time sign-in link. No password needed.
-                    </p>
-                    {error && <ErrorBanner message={error} />}
-                    <SubmitBtn loading={loading} label="Send Sign-in Link" loadingLabel="Sending…" />
-                  </form>
-                )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setLinkSent(false); setEmail(""); }}
+                  style={{ marginTop: 20, background: "none", border: "none", cursor: "pointer", fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 13, letterSpacing: 0.4, textTransform: "uppercase", color: "var(--cs-hiviz-deep)", minHeight: 0 }}
+                >
+                  Use a different email
+                </button>
               </div>
+            ) : (
+              /* ── Form ── */
+              <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                <div>
+                  <label htmlFor="email" style={labelStyle}>Email address</label>
+                  <input
+                    id="email"
+                    type="email"
+                    required
+                    autoComplete="email"
+                    autoFocus
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@company.com"
+                    style={inputStyle}
+                  />
+                </div>
+
+                {mode === "password" && (
+                  <div>
+                    <label htmlFor="password" style={labelStyle}>Password</label>
+                    <input
+                      id="password"
+                      type="password"
+                      required
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      style={inputStyle}
+                    />
+                  </div>
+                )}
+
+                <p style={{ fontFamily: "var(--font-body)", fontSize: 13.5, color: "var(--cs-muted)", margin: 0, lineHeight: 1.55 }}>
+                  {mode === "password"
+                    ? "Backup sign-in for when email links aren't getting through."
+                    : "We'll email you a one-time sign-in link — no password needed."}
+                </p>
+
+                {error && (
+                  <div style={{ fontFamily: "var(--font-body)", fontSize: 13.5, color: "var(--cs-critical)", background: "var(--cs-critical-soft)", border: "1.5px solid var(--cs-critical)", borderRadius: 10, padding: "10px 14px" }}>
+                    {error}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  style={{
+                    width: "100%", height: 58, borderRadius: 12,
+                    cursor: loading ? "not-allowed" : "pointer",
+                    background: loading ? "var(--cs-paper-deep)" : "var(--cs-hiviz)",
+                    color: loading ? "var(--cs-faint)" : "var(--cs-ink)",
+                    border: `2.5px solid ${loading ? "var(--cs-line)" : "var(--cs-ink)"}`,
+                    boxShadow: loading ? "none" : "0 4px 0 var(--cs-ink)",
+                    fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20,
+                    letterSpacing: 0.6, textTransform: "uppercase",
+                  }}
+                >
+                  {loading
+                    ? (mode === "password" ? "Signing in…" : "Sending…")
+                    : (mode === "password" ? "Sign In" : "Send Sign-in Link")}
+                </button>
+
+                {passwordAvailable && (
+                  <button
+                    type="button"
+                    onClick={() => switchMode(mode === "password" ? "link" : "password")}
+                    style={{ background: "none", border: "none", cursor: "pointer", padding: 0, minHeight: 0, fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 13, letterSpacing: 0.4, textTransform: "uppercase", color: "var(--cs-hiviz-deep)" }}
+                  >
+                    {mode === "password" ? "Use an email link instead" : "Sign in with a password"}
+                  </button>
+                )}
+              </form>
             )}
           </div>
         </div>
@@ -180,29 +231,5 @@ export default function LoginPage() {
         </p>
       </div>
     </div>
-  );
-}
-
-function ErrorBanner({ message }: { message: string }) {
-  return (
-    <div style={{ fontFamily: "var(--font-body)", fontSize: 13.5, color: "var(--cs-critical)", background: "var(--cs-critical-soft)", border: "1.5px solid var(--cs-critical)", borderRadius: 10, padding: "10px 14px" }}>
-      {message}
-    </div>
-  );
-}
-
-function SubmitBtn({ loading, label, loadingLabel }: { loading: boolean; label: string; loadingLabel: string }) {
-  return (
-    <button type="submit" disabled={loading} style={{
-      width: "100%", height: 58, borderRadius: 12, cursor: loading ? "not-allowed" : "pointer",
-      background: loading ? "var(--cs-paper-deep)" : "var(--cs-hiviz)",
-      color: loading ? "var(--cs-faint)" : "var(--cs-ink)",
-      border: `2.5px solid ${loading ? "var(--cs-line)" : "var(--cs-ink)"}`,
-      boxShadow: loading ? "none" : "0 4px 0 var(--cs-ink)",
-      fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 20,
-      letterSpacing: 0.6, textTransform: "uppercase",
-    }}>
-      {loading ? loadingLabel : label}
-    </button>
   );
 }

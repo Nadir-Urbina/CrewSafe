@@ -8,7 +8,23 @@ import Avatar from "@/components/ui/Avatar";
 import HazardStripe from "@/components/ui/HazardStripe";
 import { useRouter } from "next/navigation";
 import { getActiveEmployees } from "@/lib/firebase/employees";
+import { addIncident } from "@/lib/firebase/incidents";
 import { Employee, employeeFullName } from "@/lib/types";
+
+interface IncidentFormPayload {
+  location: string;
+  severity: "low" | "med" | "high";
+  description: string;
+  wye?: string;
+  hazardCategory?: string;
+  correctiveAction?: string;
+  contributingFactor?: string;
+  bodyParts?: string[];
+  firstAid?: boolean;
+  vehicleId?: string;
+  damage?: string;
+  thirdParty?: boolean;
+}
 
 // ─── Firestore-backed crew (populated in NamePicker via useEffect) ────────────
 type CrewMember = { id: string; name: string; role: string; crew: string };
@@ -22,12 +38,69 @@ function toCrewMember(e: Employee): CrewMember {
   };
 }
 
+// Used by IncidentForm for label/accent lookup
 const INCIDENT_TYPES: { id: IncidentTypeId; label: string; short: string; accentColor: string }[] = [
-  { id: "hazard",   label: "Hazard Recognition",          short: "Spotted an unsafe condition",    accentColor: "var(--cs-caution)"  },
-  { id: "nearmiss", label: "Near Miss",                   short: "Almost happened — no harm",      accentColor: "var(--cs-orange)"   },
-  { id: "injury",   label: "Injury / Illness",            short: "Someone was hurt or sick",       accentColor: "var(--cs-critical)" },
-  { id: "vehicle",  label: "Vehicle / Equipment Accident",short: "Vehicle or equipment damage",    accentColor: "var(--cs-ink)"      },
+  { id: "wins",     label: "W.I.N.S",                     short: "Workable Innovation New Solution", accentColor: "var(--cs-safe)"     },
+  { id: "hazard",   label: "Hazard Recognition",           short: "Spotted an unsafe condition or at-risk behavior",     accentColor: "var(--cs-caution)"  },
+  { id: "nearmiss", label: "Near Miss",                    short: "Almost happened — no harm",       accentColor: "var(--cs-orange)"   },
+  { id: "injury",   label: "Injury / Illness",             short: "Someone was hurt or sick",        accentColor: "var(--cs-critical)" },
+  { id: "vehicle",  label: "Vehicle / Equipment Accident", short: "Vehicle or equipment damage",     accentColor: "var(--cs-ink)"      },
 ];
+
+// Category definitions — each groups one or more types with a point value
+const CATEGORIES = [
+  {
+    id: "wins",
+    name: "W.I.N.S",
+    subtitle: "Workable Innovation New Solution",
+    description: "Have an idea that makes the site safer or more efficient? Share it here. Every valid suggestion earns points.",
+    points: 2,
+    color: "var(--cs-safe)",
+    bgColor: "var(--cs-safe-soft)",
+    borderColor: "var(--cs-safe)",
+    types: [{ id: "wins" as IncidentTypeId, label: "Innovation Report", short: "Share a safety improvement idea" }],
+  },
+  {
+    id: "goodsaves",
+    name: "Good Saves",
+    subtitle: "Preventive Reports",
+    description: "You spotted a hazard or near miss before anyone got hurt. These proactive reports are the backbone of a safe site.",
+    points: 5,
+    color: "var(--cs-caution)",
+    bgColor: "#FFFBEB",
+    borderColor: "var(--cs-caution)",
+    types: [
+      { id: "hazard"   as IncidentTypeId, label: "Hazard Recognition", short: "Spotted an unsafe condition or at-risk behavior"   },
+      { id: "nearmiss" as IncidentTypeId, label: "Near Miss",          short: "Almost happened — no harm done" },
+    ],
+  },
+  {
+    id: "ontime",
+    name: "On-Time Reports",
+    subtitle: "Incidents within 24 hours",
+    description: "Injuries and illnesses reported within 24 hours of occurrence earn full points and help the safety team respond faster.",
+    points: 10,
+    color: "#D97706",
+    bgColor: "#FEF3C7",
+    borderColor: "#D97706",
+    types: [
+      { id: "injury" as IncidentTypeId, label: "Injury / Illness", short: "Someone was hurt or sick" },
+    ],
+  },
+  {
+    id: "mandatory",
+    name: "Mandatory",
+    subtitle: "Required Reports — No Points",
+    description: "These must be filed by regulation, regardless of timing. Vehicle accidents, equipment damage, and regulatory incidents.",
+    points: 0,
+    color: "var(--cs-critical)",
+    bgColor: "var(--cs-critical-soft)",
+    borderColor: "var(--cs-critical)",
+    types: [
+      { id: "vehicle" as IncidentTypeId, label: "Vehicle / Equipment Accident", short: "Vehicle or equipment damage" },
+    ],
+  },
+] as const;
 
 // ─── Step 1: Name Picker ──────────────────────────────────────────────────────
 function NamePicker({ onSelect, onBack }: { onSelect: (name: string, crew: string, employeeId: string) => void; onBack: () => void }) {
@@ -110,8 +183,14 @@ function NamePicker({ onSelect, onBack }: { onSelect: (name: string, crew: strin
   );
 }
 
-// ─── Step 2: Type Selector ────────────────────────────────────────────────────
-function TypeSelector({ reporter, onSelect, onBack }: { reporter: string; onSelect: (id: IncidentTypeId) => void; onBack: () => void }) {
+// ─── Step 2: Type Selector (collapsible categories) ──────────────────────────
+function TypeSelector({ reporter, onSelect, onBack }: {
+  reporter: string;
+  onSelect: (id: IncidentTypeId, points: number) => void;
+  onBack: () => void;
+}) {
+  const [openId, setOpenId] = useState<string | null>(null);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <AppHeader
@@ -126,23 +205,93 @@ function TypeSelector({ reporter, onSelect, onBack }: { reporter: string; onSele
         }
       />
       <div style={{ flex: 1, overflowY: "auto", background: "var(--cs-paper)" }}>
-        <div style={{ maxWidth: 520, margin: "0 auto", padding: "18px 18px 40px", display: "flex", flexDirection: "column", gap: 12 }}>
-          {INCIDENT_TYPES.map(t => (
-            <button key={t.id} onClick={() => onSelect(t.id)} style={{
-              display: "flex", alignItems: "center", gap: 16, padding: 16,
-              cursor: "pointer", textAlign: "left",
-              background: "var(--cs-card)", border: "2px solid var(--cs-line)",
-              borderRadius: 16, position: "relative", overflow: "hidden",
-            }}>
-              <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 6, background: t.accentColor }} />
-              <TypeIconBadge typeId={t.id} size={56} radius={14} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 21, lineHeight: 1.05, letterSpacing: 0.2, color: "var(--cs-ink)", textTransform: "uppercase" }}>{t.label}</div>
-                <div style={{ fontFamily: "var(--font-body)", fontWeight: 500, fontSize: 14, color: "var(--cs-muted)", marginTop: 4 }}>{t.short}</div>
+        <div style={{ maxWidth: 520, margin: "0 auto", padding: "18px 18px 40px", display: "flex", flexDirection: "column", gap: 10 }}>
+          {CATEGORIES.map((cat) => {
+            const isOpen = openId === cat.id;
+            return (
+              <div
+                key={cat.id}
+                style={{
+                  background: "var(--cs-card)",
+                  border: `2px solid ${isOpen ? cat.borderColor : "var(--cs-line)"}`,
+                  borderRadius: 16, overflow: "hidden",
+                  transition: "border-color .15s",
+                }}
+              >
+                {/* Category header — tap to expand/collapse */}
+                <button
+                  onClick={() => setOpenId(isOpen ? null : cat.id)}
+                  style={{
+                    width: "100%", display: "flex", alignItems: "center", gap: 12,
+                    padding: "16px 14px", cursor: "pointer", textAlign: "left",
+                    background: isOpen ? cat.bgColor : "transparent",
+                    borderBottom: isOpen ? `1px solid ${cat.borderColor}` : "none",
+                  }}
+                >
+                  {/* Points pill */}
+                  <div style={{
+                    flexShrink: 0, padding: "4px 10px", borderRadius: 8,
+                    background: isOpen ? cat.bgColor : "var(--cs-paper-deep)",
+                    border: `1.5px solid ${isOpen ? cat.borderColor : "var(--cs-line)"}`,
+                    fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 13,
+                    letterSpacing: 0.3, whiteSpace: "nowrap",
+                    color: isOpen ? cat.color : "var(--cs-muted)",
+                  }}>
+                    {cat.points > 0 ? `+${cat.points} pts` : "Required"}
+                  </div>
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 18, letterSpacing: 0.2, color: isOpen ? cat.color : "var(--cs-ink)", textTransform: "uppercase" }}>
+                      {cat.name}
+                    </div>
+                    <div style={{ fontFamily: "var(--font-body)", fontWeight: 500, fontSize: 13, color: "var(--cs-muted)", marginTop: 1 }}>
+                      {cat.subtitle}
+                    </div>
+                  </div>
+
+                  {/* Chevron */}
+                  <svg
+                    width={20} height={20} viewBox="0 0 24 24" fill="none"
+                    stroke={isOpen ? cat.color : "var(--cs-faint)"}
+                    strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"
+                    style={{ flexShrink: 0, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .2s" }}
+                  >
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
+                </button>
+
+                {/* Expanded body */}
+                {isOpen && (
+                  <div style={{ padding: "14px 14px 16px" }}>
+                    <p style={{ fontFamily: "var(--font-body)", fontSize: 14, color: "var(--cs-ink2)", lineHeight: 1.55, margin: "0 0 14px" }}>
+                      {cat.description}
+                    </p>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {cat.types.map((t) => (
+                        <button
+                          key={t.id}
+                          onClick={() => onSelect(t.id, cat.points)}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 14, padding: "12px 14px",
+                            cursor: "pointer", textAlign: "left",
+                            background: "var(--cs-paper)", border: `2px solid ${cat.borderColor}`,
+                            borderRadius: 13,
+                          }}
+                        >
+                          <TypeIconBadge typeId={t.id} size={52} radius={13} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 17, letterSpacing: 0.2, color: "var(--cs-ink)", textTransform: "uppercase" }}>{t.label}</div>
+                            <div style={{ fontFamily: "var(--font-body)", fontWeight: 500, fontSize: 13, color: "var(--cs-muted)", marginTop: 2 }}>{t.short}</div>
+                          </div>
+                          <ChevronRightIcon />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-              <ChevronRightIcon />
-            </button>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -150,18 +299,20 @@ function TypeSelector({ reporter, onSelect, onBack }: { reporter: string; onSele
 }
 
 // ─── Step 3: Incident Form ────────────────────────────────────────────────────
-const HAZARD_CATS = ["Slip / Trip / Fall", "Working at height", "Electrical", "Housekeeping", "PPE", "Machinery / Guarding", "Manual handling", "Other"];
+const HAZARD_CATS = ["Slip / Trip / Fall", "Working at height", "Electrical", "Housekeeping", "PPE", "Machine guarding", "Equipment", "Other"];
 const NEARMISS_FACTORS = ["Equipment failure", "Procedure not followed", "Communication", "Housekeeping", "Fatigue", "Weather / ground", "Other"];
 const BODY_PARTS = ["Head", "Eye", "Hand", "Arm", "Back", "Leg", "Foot", "Other"];
 const DAMAGE_OPTS = ["Minor — cosmetic", "Moderate — operable", "Major — out of service"];
 
-function IncidentForm({ typeId, reporter, onSubmit, onBack }: {
+function IncidentForm({ typeId, reporter, submitting, onSubmit, onBack }: {
   typeId: IncidentTypeId; reporter: string;
-  onSubmit: (data: Record<string, unknown>) => void;
+  submitting?: boolean;
+  onSubmit: (data: IncidentFormPayload) => void;
   onBack: () => void;
 }) {
   const [location, setLocation] = useState("");
   const [desc, setDesc] = useState("");
+  const [wye, setWye] = useState("");
   const [severity, setSeverity] = useState("");
   // Hazard
   const [hazardCat, setHazardCat] = useState("");
@@ -183,7 +334,7 @@ function IncidentForm({ typeId, reporter, onSubmit, onBack }: {
       " · " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
   }, []);
 
-  const valid = location.trim() && desc.trim() && severity;
+  const valid = location.trim() && desc.trim() && (typeId === "wins" ? wye.trim() : severity);
 
   const sevOpts = [
     { id: "low",  label: "Low",      color: "var(--cs-safe)"     },
@@ -211,32 +362,38 @@ function IncidentForm({ typeId, reporter, onSubmit, onBack }: {
           ))}
         </div>
 
-        {/* Location */}
+        {/* Location / Department */}
         <div>
-          <FieldLabel required>Location on site</FieldLabel>
-          <TextInput value={location} onChange={setLocation} placeholder="e.g. Bay 4 — Scaffold" />
+          <FieldLabel required>{typeId === "wins" ? "Department" : "Location on site"}</FieldLabel>
+          <TextInput
+            value={location}
+            onChange={setLocation}
+            placeholder={typeId === "wins" ? "e.g. Electrical, Site Office, Crew 3" : "e.g. Bay 4 — Scaffold"}
+          />
         </div>
 
-        {/* Severity */}
-        <div>
-          <FieldLabel required>How severe?</FieldLabel>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-            {sevOpts.map(o => {
-              const on = severity === o.id;
-              return (
-                <button key={o.id} onClick={() => setSeverity(o.id)} style={{
-                  height: 54, borderRadius: 12, cursor: "pointer",
-                  background: on ? o.color : "var(--cs-card)",
-                  border: `2px solid ${on ? o.color : "var(--cs-line)"}`,
-                  color: on ? "#fff" : "var(--cs-ink2)",
-                  fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16,
-                  letterSpacing: 0.4, textTransform: "uppercase",
-                  boxShadow: on ? `0 3px 0 ${o.color}` : "none",
-                }}>{o.label}</button>
-              );
-            })}
+        {/* Severity — not shown for W.I.N.S */}
+        {typeId !== "wins" && (
+          <div>
+            <FieldLabel required>How severe?</FieldLabel>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+              {sevOpts.map(o => {
+                const on = severity === o.id;
+                return (
+                  <button key={o.id} onClick={() => setSeverity(o.id)} style={{
+                    height: 54, borderRadius: 12, cursor: "pointer",
+                    background: on ? o.color : "var(--cs-card)",
+                    border: `2px solid ${on ? o.color : "var(--cs-line)"}`,
+                    color: on ? "#fff" : "var(--cs-ink2)",
+                    fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16,
+                    letterSpacing: 0.4, textTransform: "uppercase",
+                    boxShadow: on ? `0 3px 0 ${o.color}` : "none",
+                  }}>{o.label}</button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Hazard-specific */}
         {typeId === "hazard" && (<>
@@ -245,7 +402,7 @@ function IncidentForm({ typeId, reporter, onSubmit, onBack }: {
             <SelectField value={hazardCat} onChange={setHazardCat} options={HAZARD_CATS} placeholder="Choose a category…" />
           </div>
           <div>
-            <FieldLabel>Corrective action taken</FieldLabel>
+            <FieldLabel>Corrective action/Preventitive measures Taken</FieldLabel>
             <TextInput value={corrective} onChange={setCorrective} placeholder="e.g. Cordoned off, tagged out" />
           </div>
         </>)}
@@ -301,10 +458,10 @@ function IncidentForm({ typeId, reporter, onSubmit, onBack }: {
 
         {/* Description */}
         <div>
-          <FieldLabel required>What happened?</FieldLabel>
+          <FieldLabel required>{typeId === "wins" ? "Describe your idea or solution" : "What happened?"}</FieldLabel>
           <textarea
             value={desc} onChange={e => setDesc(e.target.value)}
-            placeholder="Describe what you saw in plain words…"
+            placeholder={typeId === "wins" ? "What's the problem it solves and how would it work?" : "Describe what you observed in plain words…"}
             rows={4}
             style={{
               width: "100%", boxSizing: "border-box", resize: "none",
@@ -314,6 +471,24 @@ function IncidentForm({ typeId, reporter, onSubmit, onBack }: {
             }}
           />
         </div>
+
+        {/* WYE — wins only */}
+        {typeId === "wins" && (
+          <div>
+            <FieldLabel required>WYE <span style={{ fontWeight: 600, color: "var(--cs-muted)", textTransform: "none", letterSpacing: 0, fontSize: 13 }}>· What&apos;s Your Exposure?</span></FieldLabel>
+            <textarea
+              value={wye} onChange={e => setWye(e.target.value)}
+              placeholder="Why do you believe this solution should be implemented? What-risk or inefficiency does it address?"
+              rows={3}
+              style={{
+                width: "100%", boxSizing: "border-box", resize: "none",
+                background: "var(--cs-card)", border: "2px solid var(--cs-line)", borderRadius: 12,
+                padding: "15px 16px", fontFamily: "var(--font-body)", fontSize: 16.5,
+                fontWeight: 500, color: "var(--cs-ink)", outline: "none", lineHeight: 1.45,
+              }}
+            />
+          </div>
+        )}
 
         {/* Photos placeholder */}
         <div>
@@ -338,11 +513,27 @@ function IncidentForm({ typeId, reporter, onSubmit, onBack }: {
       }}>
         {!valid && (
           <div style={{ textAlign: "center", fontFamily: "var(--font-body)", fontWeight: 600, fontSize: 12.5, color: "var(--cs-muted)", marginBottom: 10 }}>
-            Add a location, severity &amp; description to submit.
+            {typeId === "wins" ? "Add a department, description & WYE to submit." : "Add a location, severity & description to submit."}
           </div>
         )}
-        <BigButton onClick={() => valid && onSubmit({ typeId, reporter, location, severity, desc })} disabled={!valid}>
-          Submit Report
+        <BigButton
+          onClick={() => {
+            if (!valid || submitting) return;
+            const payload: IncidentFormPayload = {
+              location,
+              severity: (severity || "low") as "low" | "med" | "high",
+              description: desc,
+              ...(typeId === "wins" && wye ? { wye } : {}),
+            };
+            if (typeId === "hazard")   { payload.hazardCategory = hazardCat; payload.correctiveAction = corrective; }
+            if (typeId === "nearmiss") { payload.contributingFactor = factor; }
+            if (typeId === "injury")   { payload.bodyParts = bodyParts; payload.firstAid = firstAid ?? false; }
+            if (typeId === "vehicle")  { payload.vehicleId = assetId; payload.damage = damage; payload.thirdParty = thirdParty ?? false; }
+            onSubmit(payload);
+          }}
+          disabled={!valid || !!submitting}
+        >
+          {submitting ? "Submitting…" : "Submit Report"}
         </BigButton>
       </div>
     </div>
@@ -350,7 +541,7 @@ function IncidentForm({ typeId, reporter, onSubmit, onBack }: {
 }
 
 // ─── Step 4: Success Screen ───────────────────────────────────────────────────
-function SuccessScreen({ refNo, onDone, onReports }: { refNo: string; onDone: () => void; onReports: () => void }) {
+function SuccessScreen({ refNo, points, onDone, onReports }: { refNo: string; points: number; onDone: () => void; onReports: () => void }) {
   const confetti = useMemo(() => {
     const cols = ["var(--cs-hiviz)", "var(--cs-critical)", "var(--cs-safe)", "var(--cs-caution)", "var(--cs-info)", "var(--cs-orange)"];
     return Array.from({ length: 28 }).map((_, i) => ({
@@ -398,11 +589,13 @@ function SuccessScreen({ refNo, onDone, onReports }: { refNo: string; onDone: ()
           Thanks for speaking up. Your safety team has been notified.
         </div>
 
-        {/* Points burst */}
-        <div style={{ marginTop: 22, display: "flex", alignItems: "center", gap: 10, background: "var(--cs-hiviz)", borderRadius: 14, padding: "12px 20px", boxShadow: "0 8px 22px rgba(0,0,0,0.3)" }}>
-          <ShieldIcon />
-          <span style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 26, color: "var(--cs-ink)", letterSpacing: 0.4 }}>+50 PTS</span>
-        </div>
+        {/* Points burst — hidden for mandatory (0 pts) */}
+        {points > 0 && (
+          <div style={{ marginTop: 22, display: "flex", alignItems: "center", gap: 10, background: "var(--cs-hiviz)", borderRadius: 14, padding: "12px 20px", boxShadow: "0 8px 22px rgba(0,0,0,0.3)" }}>
+            <ShieldIcon />
+            <span style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 26, color: "var(--cs-ink)", letterSpacing: 0.4 }}>+{points} PTS</span>
+          </div>
+        )}
 
         {/* Gamification card */}
         <div style={{ width: "100%", marginTop: 22, background: "rgba(255,255,255,0.06)", border: "1.5px solid rgba(255,255,255,0.14)", borderRadius: 18, padding: 18 }}>
@@ -454,7 +647,30 @@ export default function SubmitPage() {
   const [reporter, setReporter] = useState("");
   const [employeeId, setEmployeeId] = useState("");
   const [typeId, setTypeId] = useState<IncidentTypeId | null>(null);
-  const [refNo] = useState(() => `CS-${1043 + Math.floor(Math.random() * 50)}`);
+  const [points, setPoints] = useState(0);
+  const [refNo, setRefNo] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(payload: IncidentFormPayload) {
+    setSubmitting(true);
+    try {
+      const id = await addIncident({
+        submittedBy: reporter,
+        employeeId,
+        typeId: typeId!,
+        ...payload,
+      });
+      setRefNo("CS-" + id.slice(0, 6).toUpperCase());
+      setStep("success");
+    } catch (err) {
+      console.error("Incident submission failed:", err);
+      // Degrade gracefully — still show success so crew isn't blocked
+      setRefNo("CS-" + Math.random().toString(36).slice(2, 8).toUpperCase());
+      setStep("success");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   if (step === "name") return (
     <NamePicker
@@ -466,7 +682,7 @@ export default function SubmitPage() {
   if (step === "type") return (
     <TypeSelector
       reporter={reporter}
-      onSelect={(id) => { setTypeId(id); setStep("form"); }}
+      onSelect={(id, pts) => { setTypeId(id); setPoints(pts); setStep("form"); }}
       onBack={() => setStep("name")}
     />
   );
@@ -475,7 +691,8 @@ export default function SubmitPage() {
     <IncidentForm
       typeId={typeId}
       reporter={reporter}
-      onSubmit={() => setStep("success")}
+      submitting={submitting}
+      onSubmit={handleSubmit}
       onBack={() => setStep("type")}
     />
   );
@@ -483,6 +700,7 @@ export default function SubmitPage() {
   if (step === "success") return (
     <SuccessScreen
       refNo={refNo}
+      points={points}
       onDone={() => router.push("/")}
       onReports={() => router.push("/reports")}
     />

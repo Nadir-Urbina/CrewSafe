@@ -1,14 +1,6 @@
 import Link from "next/link";
 import HazardStripe from "@/components/ui/HazardStripe";
 
-function ShieldIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--cs-ink)" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/>
-      <path d="M9 12l2 2 4-4"/>
-    </svg>
-  );
-}
 
 function ListIcon() {
   return (
@@ -70,17 +62,12 @@ export default function HomePage() {
         }}>
           {/* Wordmark */}
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-            <div style={{
-              width: 30, height: 30, borderRadius: 7, background: "var(--cs-hiviz)",
-              display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-            }}>
-              <ShieldIcon />
-            </div>
+            <img src="/hhlAppIcon.png" alt="Hard Hat League" style={{ width: 34, height: 34, borderRadius: 8, flexShrink: 0 }} />
             <div style={{
               fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 26,
               lineHeight: 1, letterSpacing: 0.5, color: "#fff", textTransform: "uppercase",
             }}>
-              Crew<span style={{ color: "var(--cs-hiviz)" }}>Safe</span>
+              Hard Hat <span style={{ color: "var(--cs-hiviz)" }}>League</span>
             </div>
           </div>
 

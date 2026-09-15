@@ -9,8 +9,6 @@ import {
 } from "firebase/auth";
 import app from "./config";
 
-const EMAIL_LINK_KEY = "crewsafe_signin_email";
-
 // Lazy singleton — avoids calling getAuth() at module scope during SSR
 let _auth: Auth | null = null;
 export function getFirebaseAuth(): Auth {
@@ -27,25 +25,24 @@ export async function logoutAdmin() {
 }
 
 export async function sendAdminSignInLink(email: string) {
+  // Encode email in the redirect URL so cross-device sign-in works without a prompt
+  const encoded = encodeURIComponent(email);
   const actionCodeSettings = {
-    url: `${window.location.origin}/login/verify`,
+    url: `${window.location.origin}/login/verify?email=${encoded}`,
     handleCodeInApp: true,
   };
   await sendSignInLinkToEmail(getFirebaseAuth(), email, actionCodeSettings);
-  // Persist email so the verify page can complete sign-in without prompting again
-  window.localStorage.setItem(EMAIL_LINK_KEY, email);
 }
 
 export async function completeSignInWithEmailLink(url: string) {
   const auth = getFirebaseAuth();
   if (!isSignInWithEmailLink(auth, url)) return null;
 
-  let email = window.localStorage.getItem(EMAIL_LINK_KEY);
+  const email = new URL(url).searchParams.get("email") ?? "";
+
   if (!email) {
-    // Fallback: ask the user (handles the case where they opened the link on a different device)
-    email = window.prompt("Please enter your email to confirm sign-in") ?? "";
+    throw new Error("Could not determine your email address. Please request a new sign-in link.");
   }
-  const result = await signInWithEmailLink(auth, email, url);
-  window.localStorage.removeItem(EMAIL_LINK_KEY);
-  return result;
+
+  return signInWithEmailLink(auth, email, url);
 }

@@ -25,7 +25,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CrewSafe",
+  title: "Hard Hat League",
   description: "Safety incident reporting and management for field teams",
 };
 

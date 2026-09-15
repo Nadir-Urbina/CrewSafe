@@ -10,4 +10,5 @@ export const COLLECTIONS = {
   heatLogs: "heatLogs",
   rewards: "rewards",
   leaderboard: "leaderboard",
+  settings: "settings",
 } as const;

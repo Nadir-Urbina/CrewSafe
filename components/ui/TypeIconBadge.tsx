@@ -1,10 +1,11 @@
-export type IncidentTypeId = "hazard" | "nearmiss" | "injury" | "vehicle";
+export type IncidentTypeId = "hazard" | "nearmiss" | "injury" | "vehicle" | "wins";
 
 const TYPES = {
   hazard:   { color: "var(--cs-caution)",  soft: "var(--cs-caution-soft)", icon: "triangle" },
   nearmiss: { color: "var(--cs-orange)",   soft: "var(--cs-orange-soft)",  icon: "bolt"     },
   injury:   { color: "var(--cs-critical)", soft: "var(--cs-critical-soft)",icon: "cross"    },
   vehicle:  { color: "var(--cs-ink)",      soft: "oklch(0.92 0.012 75)",   icon: "truck"    },
+  wins:     { color: "var(--cs-safe)",     soft: "var(--cs-safe-soft)",    icon: "bulb"     },
 } as const;
 
 function TypeIcon({ name, size, color }: { name: string; size: number; color: string }) {
@@ -14,6 +15,7 @@ function TypeIcon({ name, size, color }: { name: string; size: number; color: st
     bolt:     <g {...p}><path d="M13.5 3L5 13.5h6L9.5 21 19 10h-6z"/></g>,
     cross:    <g {...p}><path d="M9.5 3.5h5v6h6v5h-6v6h-5v-6h-6v-5h6z"/></g>,
     truck:    <g {...p}><path d="M2 6.5h11v9H2zM13 9.5h4l3 3v3h-7z"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></g>,
+    bulb:     <g {...p}><path d="M9 21h6M10 17.5h4M12 3a6 6 0 016 6c0 2.3-1.3 4.2-3 5.5V17H9v-1.5A7 7 0 016 9a6 6 0 016-6z"/></g>,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" style={{ display: "block", flexShrink: 0 }}>
