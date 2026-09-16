@@ -7,6 +7,7 @@ import {
   initializeApp,
   App,
   Credential,
+  deleteApp,
 } from "firebase-admin/app";
 import { ExternalAccountClient } from "google-auth-library";
 import { getAuth, Auth } from "firebase-admin/auth";
@@ -146,6 +147,40 @@ function adminApp(): App {
       ...(serviceAccountId && !credential ? { serviceAccountId } : {}),
     },
     APP_NAME
+  );
+}
+
+/**
+ * Drops the cached app so the next call rebuilds its credentials from scratch.
+ * Recovers the cert and workload-identity paths, whose credentials are rebuilt
+ * on re-initialisation.
+ *
+ * It does NOT recover Application Default Credentials: firebase-admin caches
+ * those in a module-level `globalAppDefaultCred` that survives deleteApp, so a
+ * process that loaded ADC keeps the old refresh token until it restarts. The
+ * only clear for that is `clearGlobalAppDefaultCred`, which upstream marks as
+ * exported for testing — not something to depend on here. Local development is
+ * the only place this bites, and restarting the dev server fixes it.
+ */
+export async function resetAdminApp() {
+  const existing = getApps().find((a) => a.name === APP_NAME);
+  if (existing) {
+    try {
+      await deleteApp(existing);
+    } catch {
+      // Already torn down by a concurrent request; nothing to do.
+    }
+  }
+}
+
+/** Credential problems are recoverable by rebuilding the app; others are not. */
+export function isCredentialError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    message.includes("invalid_grant") ||
+    message.includes("invalid_rapt") ||
+    message.includes("failed to fetch a valid Google OAuth2 access token") ||
+    message.includes("Could not load the default credentials")
   );
 }
 
