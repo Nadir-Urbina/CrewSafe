@@ -60,11 +60,7 @@ export default function AdminSidebar() {
   const { name, initials, email, role } = getUserDisplay(user);
 
   async function handleLogout() {
-    // Clear both sign-in paths — either one alone would keep the session alive.
-    await Promise.allSettled([
-      logoutAdmin(),
-      fetch("/api/admin/logout", { method: "POST" }),
-    ]);
+    await logoutAdmin();
     router.replace("/login");
   }
 

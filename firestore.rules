@@ -1,0 +1,137 @@
+rules_version = '2';
+
+// Hard Hat League — Firestore security rules
+//
+// Two audiences:
+//   • Crew (unauthenticated) — submit incidents and heat logs, view the roster,
+//     the leaderboard, and their own report history. No sign-in on the crew app.
+//   • Admins (Firebase email-link sign-in) — everything else.
+//
+// Admin identity: an `admin: true` custom claim on the Firebase ID token. The
+// claim is issued server-side by the Admin SDK from the employees collection
+// (role "admin", active), so that collection stays the single source of truth.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helpers ──────────────────────────────────────────────────────────
+
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    function incoming() { return request.resource.data; }
+
+    function isNonEmptyString(field) {
+      return incoming()[field] is string && incoming()[field].size() > 0;
+    }
+
+    // Server timestamps only — stops clients backdating or forging audit fields.
+    function stampedNow(field) {
+      return incoming()[field] == request.time;
+    }
+
+    // ─── Employees (the crew roster) ──────────────────────────────────────
+    // Readable by the crew app — it populates the "who are you" pickers on
+    // /submit, /heat-illness, /reports and /leaderboard.
+    // NOTE: this exposes every employee's email and role to anyone who can
+    // reach the app. See the note at the bottom of this file.
+
+    match /employees/{employeeId} {
+      allow read: if true;
+
+      allow create: if isAdmin()
+        && isNonEmptyString('firstName')
+        && isNonEmptyString('lastName')
+        && incoming().email is string
+        && incoming().active is bool
+        && incoming().points is int
+        && stampedNow('createdAt');
+
+      allow update: if isAdmin()
+        && stampedNow('updatedAt')
+        // createdAt is immutable once set.
+        && incoming().createdAt == resource.data.createdAt;
+
+      allow delete: if isAdmin();
+    }
+
+    // ─── Incidents ────────────────────────────────────────────────────────
+    // Anyone can file one; only admins can change or remove one.
+
+    match /incidents/{incidentId} {
+      allow read: if true;
+
+      allow create: if
+           isNonEmptyString('submittedBy')
+        && isNonEmptyString('employeeId')
+        && isNonEmptyString('description')
+        && incoming().description.size() <= 5000
+        && incoming().type in ['hazard', 'near-miss', 'injury-illness', 'vehicle-accident', 'wins']
+        // A new report always starts as 'new' — clients can't self-triage.
+        && incoming().status == 'new'
+        && incoming().date is string
+        && stampedNow('createdAt')
+        && stampedNow('updatedAt')
+        // Admin-only fields cannot be set at submission time.
+        && !incoming().keys().hasAny(['investigationNotes', 'reviewedBy']);
+
+      allow update: if isAdmin() && stampedNow('updatedAt');
+      allow delete: if isAdmin();
+    }
+
+    // ─── Heat illness logs ────────────────────────────────────────────────
+    // Crew submit these from the heat-illness page. They are health-adjacent,
+    // so they are write-only for the crew and readable only by admins.
+
+    match /heatLogs/{logId} {
+      allow read: if isAdmin();
+
+      allow create: if
+           isNonEmptyString('employeeId')
+        && stampedNow('createdAt');
+
+      allow update, delete: if isAdmin();
+    }
+
+    // ─── Reward tiers ─────────────────────────────────────────────────────
+
+    match /rewards/{rewardId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    // ─── Leaderboard ──────────────────────────────────────────────────────
+
+    match /leaderboard/{entryId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    // ─── Settings (heat program thresholds, etc.) ─────────────────────────
+    // Read publicly: /heat-illness needs the thresholds to classify the day.
+
+    match /settings/{settingId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    // ─── Default deny ─────────────────────────────────────────────────────
+    // Anything not matched above is denied. Listed explicitly so that adding a
+    // new collection is a deliberate act rather than an accidental opening.
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+// ─── Known gaps, deliberately left for a follow-up ──────────────────────────
+//
+// 1. `employees` and `incidents` are world-readable because the crew app is
+//    unauthenticated. Anyone who can reach the app can read the full roster and
+//    every incident report. Closing this needs the crew app to authenticate.
+//
+// 2. Revoking an admin in the roster does not take effect until that user's ID
+//    token refreshes (up to an hour) or they sign in again. Immediate lockout
+//    needs adminAuth().revokeRefreshTokens(uid) at the same time.
