@@ -38,17 +38,26 @@ export default function LoginPage() {
   const [loading, setLoading]   = useState(false);
   const [linkSent, setLinkSent] = useState(false);
   const [error, setError]       = useState("");
-  const [passwordAvailable, setPasswordAvailable] = useState(false);
+  // null = not yet known. The password option is hidden only when the server
+  // explicitly reports it unconfigured; a failed probe leaves it visible.
+  const [passwordAvailable, setPasswordAvailable] = useState<boolean | null>(null);
 
-  // The server decides whether a break-glass password is configured at all.
+  // Ask the server whether a break-glass password is configured. This is a
+  // break-glass path, so it fails OPEN: only an explicit `enabled: false`
+  // hides it. Hiding the emergency exit whenever the probe itself fails would
+  // remove it in exactly the circumstances it exists for, and leaves no clue
+  // as to why — pressing it when misconfigured returns a readable 503 instead.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/admin/fallback-login")
+    fetch("/api/admin/fallback-login", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (!cancelled) setPasswordAvailable(Boolean(data?.enabled));
+        if (cancelled) return;
+        setPasswordAvailable(data === null ? null : Boolean(data.enabled));
       })
-      .catch(() => {});
+      .catch(() => {
+        // Leave it visible; the POST will report the real reason.
+      });
     return () => { cancelled = true; };
   }, []);
 
@@ -214,7 +223,7 @@ export default function LoginPage() {
                     : (mode === "password" ? "Sign In" : "Send Sign-in Link")}
                 </button>
 
-                {passwordAvailable && (
+                {passwordAvailable !== false && (
                   <button
                     type="button"
                     onClick={() => switchMode(mode === "password" ? "link" : "password")}

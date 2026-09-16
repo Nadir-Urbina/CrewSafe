@@ -7,10 +7,18 @@ import {
   verifyCredentials,
 } from "@/lib/auth/fallbackCredentials";
 
+// Never cache either handler: the answer depends on server env vars that can
+// change between deploys, and a cached "disabled" would hide the break-glass
+// option until the next build.
+export const dynamic = "force-dynamic";
+
 /** Tells the login page whether to offer the password option at all. */
 export async function GET() {
   // Hidden unless the server can actually complete the exchange.
-  return Response.json({ enabled: fallbackLoginEnabled() && canMintCustomTokens() });
+  return Response.json(
+    { enabled: fallbackLoginEnabled() && canMintCustomTokens() },
+    { headers: { "Cache-Control": "no-store" } }
+  );
 }
 
 function clientKey(request: Request) {
