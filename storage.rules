@@ -1,0 +1,56 @@
+rules_version = '2';
+
+// Hard Hat League — Cloud Storage security rules
+//
+// Nothing in the app uploads to Storage yet — `Incident.photoUrl` in
+// lib/types.ts is the only hook, and it is currently unused. These rules are a
+// locked-down starting point so that when incident photos do get wired up, the
+// bucket is not open by default.
+//
+// Storage rules cannot read Firestore, so the /admins allowlist used by
+// firestore.rules is unavailable here. Admin checks below use a custom claim
+// (`admin: true`) set via the Admin SDK. Until that claim is issued, the
+// admin-only rules deny everyone — which is the safe direction to fail.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ─── Helpers ──────────────────────────────────────────────────────────
+
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    function isImage() {
+      return request.resource.contentType.matches('image/(jpeg|png|webp|heic|heif)');
+    }
+
+    function underSizeLimit() {
+      return request.resource.size < 10 * 1024 * 1024; // 10 MB
+    }
+
+    // ─── Incident photos ──────────────────────────────────────────────────
+    // Crew submit incidents without signing in, so uploads are open — but
+    // constrained to images under 10 MB, and writes cannot overwrite an
+    // existing object (resource == null means "this path is empty").
+
+    match /incidents/{incidentId}/{fileName} {
+      allow read:   if true;
+      allow create: if resource == null && isImage() && underSizeLimit();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ─── Employee roster imports (admin only) ─────────────────────────────
+
+    match /imports/{fileName} {
+      allow read, write: if isAdmin();
+    }
+
+    // ─── Default deny ─────────────────────────────────────────────────────
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

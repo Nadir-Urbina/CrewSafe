@@ -1,7 +1,8 @@
 "use client";
 
-import { sendAdminSignInLink } from "@/lib/firebase/auth";
+import { sendAdminSignInLink, signInWithFallbackToken } from "@/lib/firebase/auth";
 import HazardStripe from "@/components/ui/HazardStripe";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 
@@ -30,6 +31,7 @@ const labelStyle: React.CSSProperties = {
 type Mode = "link" | "password";
 
 export default function LoginPage() {
+  const router = useRouter();
   const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode]         = useState<Mode>("link");
@@ -41,7 +43,7 @@ export default function LoginPage() {
   // The server decides whether a break-glass password is configured at all.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/admin/session")
+    fetch("/api/admin/fallback-login")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!cancelled) setPasswordAvailable(Boolean(data?.enabled));
@@ -66,14 +68,17 @@ export default function LoginPage() {
       body: JSON.stringify({ email, password }),
     });
 
-    if (!res.ok) {
-      const data = await res.json().catch(() => null);
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok || !data?.token) {
       setError(data?.error ?? "Could not sign in. Please try again.");
       return;
     }
 
-    // Full navigation so AuthProvider re-reads the newly set session cookie.
-    window.location.href = "/admin";
+    // Exchange the custom token for a real Firebase session, so this login
+    // carries the same admin claim the security rules check.
+    await signInWithFallbackToken(data.token);
+    router.replace("/admin");
   }
 
   async function handleSubmit(e: React.FormEvent) {

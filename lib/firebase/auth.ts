@@ -1,6 +1,6 @@
 import {
   getAuth,
-  signInWithEmailAndPassword,
+  signInWithCustomToken,
   signOut,
   sendSignInLinkToEmail,
   isSignInWithEmailLink,
@@ -16,8 +16,12 @@ export function getFirebaseAuth(): Auth {
   return _auth;
 }
 
-export async function loginAdmin(email: string, password: string) {
-  return signInWithEmailAndPassword(getFirebaseAuth(), email, password);
+/**
+ * Completes a break-glass sign-in. The server has already checked the password
+ * and stamped the admin claim onto the token it minted.
+ */
+export async function signInWithFallbackToken(customToken: string) {
+  return signInWithCustomToken(getFirebaseAuth(), customToken);
 }
 
 export async function logoutAdmin() {
